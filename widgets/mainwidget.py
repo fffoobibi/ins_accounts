@@ -61,9 +61,9 @@ class Main(QWidget, Ui_Form):
         self._title.setStyleSheet('TitleWidget{background:#414450 }')
         self.setStyleSheet('Main{background: #414450}QLabel{color: white}'
                            'QLabel{font-family: 微软雅黑;color:white}'
-                           'QLineEdit{background: #3A3D4C;font-family: 微软雅黑;color:white;border:1px solid #282A36}'
-                           'QPushButton{background-color:#282A36;border: 1px solid #282A36; padding:0px 4px;'
-                           'border-radius:3px;color:white; font-family: 微软雅黑;height:20px}')
+                           'QLineEdit{background: #3A3D4C;font-family: 微软雅黑;color:white;border:1px solid #282A36;padding:2px 2px;}'
+                           'QPushButton{background-color:#6272A4;border: 1px solid #282A36; padding:0px 5px;'
+                           'border-radius:3px;color:lightgray; font-family: 微软雅黑;height:20px}')
         self.setWindowTitle('Ins账号管理')
         table = self.tableWidget
         table.itemClicked.connect(update_table_style)
