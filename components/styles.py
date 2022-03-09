@@ -68,7 +68,7 @@ class Sh(str, Enum):
 
     table_h_scroll_style = '''
         QScrollBar:horizontal {background: #282A36;padding: 0px;border-radius: 3px;max-height: 8px;}
-        QScrollBar::handle:horizontal {background: 54555D;min-width: 20px;border-radius: 3px;}
+        QScrollBar::handle:horizontal {background: #54555D;min-width: 20px;border-radius: 3px;}
         QScrollBar::handle:horizontal:hover {background: #54555D;}
         QScrollBar::handle:horizontal:pressed {background: #54555D;}
         QScrollBar::add-page:horizontal {background: none;}

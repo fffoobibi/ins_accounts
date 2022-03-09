@@ -9,6 +9,8 @@ import sys
 import time
 import math
 import asyncio
+import weakref
+
 import aiohttp
 import threading
 
@@ -29,13 +31,13 @@ from typing import Optional, Generator, Tuple, Any, Union, List, Callable
 from PyQt5.QtWidgets import (QApplication, QLineEdit, QPushButton, QLabel, QWidget, QDialog, QFileDialog,
                              QListWidgetItem, QFrame, QStyledItemDelegate, QStyleOptionViewItem, QComboBox,
                              QCompleter, QListWidget, QListView, QGridLayout, QSpacerItem, QSizePolicy, QHBoxLayout,
-                             QVBoxLayout, QTableWidget, QHeaderView, QMenu)
+                             QVBoxLayout, QTableWidget, QHeaderView, QMenu, QGraphicsDropShadowEffect)
 from PyQt5.QtCore import (QObject, QThread, QRectF, QModelIndex, QSortFilterProxyModel, QSettings,
                           Qt, pyqtSignal, QSize, QPropertyAnimation, QMargins,
                           pyqtSlot, QByteArray, QBuffer, QEvent, QRect, QPoint)
 from PyQt5.QtGui import (QPixmap, QIcon, QCursor, QKeyEvent, QMovie, QPainter, QTransform,
                          QColor, QFont, QEnterEvent, QPalette, QPen, QFontMetrics, QWheelEvent,
-                         QMouseEvent, QResizeEvent, QKeySequence, QPainterPath, QPolygonF, QBitmap)
+                         QMouseEvent, QResizeEvent, QKeySequence, QPainterPath, QPolygonF, QBitmap, QBrush)
 
 from .styles import Sh
 
@@ -1539,7 +1541,7 @@ class ZoomLabel(ImgLabel):
             scaled = min(scaled, scaled_h)
 
             height = int(scaled * pixmap_rect.height())
-            width = int(rect.width() * scaled)
+            width = int(pixmap_rect.width() * scaled)
             x = (rect.width() - width) / 2
             y = (rect.height() - height) / 2
             rect = QRect(x, y, width, height)
@@ -2381,7 +2383,7 @@ class Message(QDialog):
         self.icon_label.setFixedHeight(18)
 
         self.label = QLabel()
-        self.label.setStyleSheet("border:none;font-family:微软雅黑")
+        self.label.setStyleSheet("QLabel{border:none;font-family:微软雅黑;color:black}")
         self.label.setAlignment(Qt.AlignCenter)
         self._timer = None
         lay = QHBoxLayout(self)
@@ -2649,29 +2651,69 @@ class Modal(object):
 
     @classmethod
     def show(cls, title: str, show_content: QWidget, parent: QWidget,
-             bar_color=QColor('#426BDD'),
-             text_color=Qt.white,
-             back_color=Qt.white):
-        t = TitleWidget(title, show_content, bar_color, parent)
+             bar_color=None,
+             text_color=None,
+             back_color=None, call_back=None, cancel_back=None, center=True):
+
+        def wrapper_ok():
+            ret = None
+            if call_back is not None:
+                ret = call_back()
+            if ret:
+                del show_content.ok_btn
+                del show_content.cancel_btn
+                show_content.close()
+
+        def wrapper_cancel():
+            ret = None
+            if cancel_back is not None:
+                ret = cancel_back()
+            if ret:
+                del show_content.ok_btn
+                del show_content.cancel_btn
+                show_content.close()
+
+        t = TitleWidget(title, show_content, parent,
+                        back_ground_color=back_color,
+                        text_color=text_color, bar_color=bar_color,
+                        button_hide_policy={'max', 'min'})
+
+        t.setWindowFlags(t.windowFlags() | Qt.Dialog)
+        t.setWindowModality(Qt.WindowModal)
+
         cls._hook_modal(t)
         cls._hook_parent(parent)
 
-        t.setWindowFlags(Qt.FramelessWindowHint | Qt.Dialog)
-        t.setWindowModality(Qt.WindowModal)
-        t.setTextColor(text_color)
-        t.hide_titlebar_all()
-        btn = t.close_btn(
-            'QPushButton{color:%s;border:none;background:transparent}' % QColor(text_color).name())
-        t.addTitleWidget(btn)
-        t.resize(show_content.size())
-        t.setStyleSheet('TitleWidget{background:%s}' %
-                        QColor(back_color).name())
-        desk = QApplication.desktop().size()
-        si = show_content.size()
-        x = (desk - si) / 2
-        t.move(QPoint(x.width(), x.height()))
+        frame = QFrame()
+        frame_lay = QHBoxLayout(frame)
+        frame_lay.addSpacerItem(QSpacerItem(20, 20, hPolicy=QSizePolicy.Expanding))
+
+        cancel_btn = QPushButton('取消', clicked=wrapper_cancel)
+        ok_btn = QPushButton('确认', clicked=wrapper_ok)
+        cancel_btn.setCursor(Qt.PointingHandCursor)
+        ok_btn.setCursor(Qt.PointingHandCursor)
+
+        show_content.ok_btn = ok_btn
+        show_content.cancel_btn = cancel_btn
+
+        frame_lay.addWidget(cancel_btn)
+        frame_lay.addWidget(ok_btn)
+
+        t.layout().addWidget(frame, 0)
+
+        size = show_content.size()
+        size.setWidth(size.width() + 10)
+        t.resize(size)
         parent._leave_focus()
-        t.show()
+        if center:
+            desk = QApplication.desktop().size()
+            x = (desk - size) / 2
+            show_content.move(QPoint(x.width(), x.height()))
+        else:
+            target = (parent.size() - size) / 2
+            h = parent.mapToGlobal(QPoint(0, 0))
+            show_content.move(QPoint(h.x() + target.width(), h.y() + target.height()))
+        show_content.show()
 
 
 class Confirm(QDialog):
@@ -3693,8 +3735,8 @@ class TitleBar(QWidget):
         layout.addSpacerItem(QSpacerItem(
             40, 20, QSizePolicy.Expanding, QSizePolicy.Minimum))
         # 利用Webdings字体来显示图标
-        font = self.font() or QFont()
-        font.setFamily('Webdings')
+        # font = self.font() or QFont()
+        font = QFont('Webdings')
         # 最小化按钮
         self.buttonMinimum = QPushButton(
             '0', self, clicked=self.windowMinimumed.emit, font=font, objectName='buttonMinimum')
@@ -3752,6 +3794,12 @@ class TitleBar(QWidget):
     def setTitle(self, title):
         """设置标题"""
         self.titleLabel.setText(f'<b>{title}</b>')
+
+    def setBarColor(self, color):
+        palette = QPalette(self.palette())
+        palette.setColor(QPalette.Window, QColor(color))
+        self.setPalette(palette)
+        self.update()
 
     def setTitleStyle(self, styleSheet: str):
         self.titleLabel.setStyleSheet(styleSheet)
@@ -3836,6 +3884,20 @@ class FramelessWindow(QWidget):
         self.windowTitleChanged.connect(self.titleBar.setTitle)
         self.windowIconChanged.connect(self.titleBar.setIcon)
 
+        # frame = QFrame(self)
+        # frame.setStyleSheet('QFrame{border-radius: %spx}' % self.Margins)
+        # shadow = QGraphicsDropShadowEffect(self)
+        # shadow.setOffset(0)
+        # shadow.setColor(Qt.black)
+        # shadow.setBlurRadius(self.Margins * 2)
+        # frame.setGraphicsEffect(shadow)
+        # frame.setAttribute(Qt.WA_TransparentForMouseEvents)
+        # self._frame = frame
+
+    # def resizeEvent(self, a0) -> None:
+    #     super(FramelessWindow, self).resizeEvent(a0)
+    #     self._frame.resize(self.size())
+
     def set_auto_resize(self, value: bool):
         self._auto_resize = value
 
@@ -3850,6 +3912,13 @@ class FramelessWindow(QWidget):
         """设置标题栏高度"""
         self.titleBar.setHeight(height)
 
+    def setBackgroundColor(self, color):
+        palatte = QPalette(self.palette())
+        palatte.setColor(QPalette.Background, QColor(color))
+        self.setAutoFillBackground(True)
+        self.setPalette(palatte)
+        self.update()
+
     def setTitleBarColor(self, color):
         palatte = QPalette(self.titleBar.palette())
         palatte.setColor(QPalette.Background, QColor(color))
@@ -3857,6 +3926,14 @@ class FramelessWindow(QWidget):
         self.titleBar.setAutoFillBackground(True)
         self.titleBar.setPalette(palatte)
         self.titleBar.update()
+
+    def setTitleTextColor(self, color):
+        label = self.titleBar.titleLabel
+        palatte = QPalette(label.palette())
+        palatte.setColor(QPalette.Foreground, QColor(color))
+        # label.setAutoFillBackground(True)
+        label.setPalette(palatte)
+        label.update()
 
     def barColor(self) -> QColor:
         palatte = self.titleBar.palette()
@@ -3913,6 +3990,7 @@ class FramelessWindow(QWidget):
         height = self.barHeight()
         if not self.titleBar.isHidden():
             painter.setPen(self.barColor())
+            # painter.setPen(self.border_color)
             painter.fillRect(QRect(0, 0, self.width(), self.barHeight()), bar)
 
             painter.setPen(QPen(self.border_color, 1))
@@ -3924,6 +4002,22 @@ class FramelessWindow(QWidget):
         else:
             painter.setPen(self.border_color)
             painter.drawRect(0, 0, self.width() - 1, self.height() - 1)
+
+        # path = QPainterPath()
+        # path.setFillRule(Qt.WindingFill)
+        # path.addRect(10, 10, self.width() - 20, self.height() - 20)
+        # # painter = QPainter(self)
+        # painter.setRenderHint(QPainter.Antialiasing, True)
+        # painter.fillPath(path, QBrush(Qt.white))
+        # color = QColor(0, 0, 0, 50)
+        # for i in range(self.Margins):
+        #     path = QPainterPath()
+        #     path.setFillRule(Qt.WindingFill)
+        #     path.addRect(self.Margins - i, self.Margins - i, self.width() - (self.Margins - i) * 2,
+        #                  self.height() - (self.Margins - i) * 2)
+        #     color.setAlpha(150 - math.sqrt(i) * 50)
+        #     painter.setPen(color)
+        #     painter.drawPath(path)
 
     def mousePressEvent(self, event):
         """鼠标点击事件"""
@@ -4103,44 +4197,101 @@ class FramelessWindow(QWidget):
         animation.start()
 
 
+def color(**config_params):
+    def wrapper(func, cls):
+        def inner(self, *args, **kwargs):
+            func(self, *args, **kwargs)
+            self.root = TitleWidget(config_params.get('title', 'default'), self)
+
+        return inner
+
+    def inner(cls):
+        TitleWidget.config(**config_params)
+        cls.__init__ = wrapper(cls.__init__, cls)
+        return cls
+
+    return inner
+
+
 class TitleWidget(FramelessWindow):
+    _instances_ = weakref.WeakValueDictionary()
+    _configs_ = dict(
+        bar_height=None,
+        back_ground_color=None,
+        bar_color=QColor('#426BDD'),
+        border_color=Qt.transparent,
+        text_color=Qt.red,
+        auto_resize=False,
+        nestle_enable=False,
+        icon=QIcon(),
+        icon_size=16,
+        button_text_color=Qt.white,
+        button_hover_color=QColor(109, 139, 222),
+        button_hide_policy=None)
 
     @property
     def content_widget(self) -> QWidget:
         return self._widget
 
-    c = content_widget
+    @classmethod
+    def config(cls, **config_params):
+        cls._configs_.update(**config_params)
+        for k in cls._instances_:
+            cls._instances_[k].set_style()
 
-    def __init__(self, title: str, widget: QWidget = None, bar_color: Union[str, QColor] = '#426BDD',
-                 parent: QWidget = None, auto_resize: bool = False, nestle_enable: bool = False, border_color=None):
+    @classmethod
+    def config_from_json(cls, json_file: str, encoding='utf8'):
+        import json
+        cls.config(json.load(open(json_file, mode='r', encoding=encoding)))
+
+    def _init_attr_(self, **kw):
+        for k in self._configs_:
+            if k != 'bar_height':
+                setattr(self, k, kw.get(k) or self._configs_.get(k))
+            else:
+                bar_height = self.titleBar.titleLabel.fontMetrics().height() + 10
+                setattr(self, k, kw.get(k) or (self._configs_.get(k) or bar_height))
+
+    def __init__(self, title: str, widget: QWidget = None, parent: QWidget = None, **kw):
         super().__init__(parent)
-        self.border_color = border_color or self.border_color
-        self.set_auto_resize(auto_resize)
+        self.kw = kw
         self.setWindowFlags(self.windowFlags() | Qt.WindowStaysOnTopHint)
-        self.setTitleBarColor(QColor(bar_color))
         self.setWindowTitle(title)
-        self.nestle_enable = nestle_enable
-        title_bar = self.titleBar
-        title_bar.setTitleStyle('color: white')
-        title_bar.buttonMaximum.hide()
-        title_bar.buttonMinimum.setStyleSheet(
-            'QPushButton{color:white}QPushButton:hover{background:rgb(109,139,222)}')
-        title_bar.buttonClose.setStyleSheet(
-            'QPushButton{color:white}QPushButton:hover{background: rgb(109,139,222)}')
-        title_height = title_bar.titleLabel.fontMetrics().height() + 10
-        self.setTitleBarHeight(title_height)
+        self.set_style()
         if widget is not None:
             self.set_content_Widget(widget)
+        self._instances_[id(self)] = self
 
-        self.setIconSize(16)
-        self.setWindowIcon(QIcon(':/imgs/favicon.ico'))
+        # shadow = QGraphicsDropShadowEffect(self)
+        # shadow.setOffset(0)
+        # shadow.setColor(Qt.black)
+        # shadow.setBlurRadius(9)
+        # self.setGraphicsEffect(shadow)
+        # self.setStyleSheet('TitleWidget{background: %s}' % QColor(self.back_ground_color).name())
+        # self.setAttribute(Qt.WA_TranslucentBackground, True)
+
+    @classmethod
+    def instance(cls, id_value):
+        return cls._instances_.get(id_value)
+
+    def set_style(self):
+        self._init_attr_(**self.kw)
+        self.setWindowIcon(self.icon)
+        self.set_auto_resize(self.auto_resize)
+        self.setTitleBarColor(self.bar_color)
+        self.setTextColor(self.text_color)
+        self.setIconSize(self.icon_size)
+        self.setButtonStyle(self.button_text_color, self.button_hover_color, self.button_hide_policy)
+        self.setTitleBarHeight(self.bar_height)
+        if self.back_ground_color is not None:
+            self.setBackgroundColor(self.back_ground_color)
 
     def hide_title_bar(self):
         self.titleBar.hide()
 
     def set_content_Widget(self, target: QWidget):
         target.root = self
-        target.setWindowFlags(Qt.FramelessWindowHint)
+        # target.setWindowFlags(Qt.FramelessWindowHint)
         self.setWidget(target)
         self.override_widget()
 
@@ -4155,6 +4306,28 @@ class TitleWidget(FramelessWindow):
         self.titleBar.buttonClose.setStyleSheet(s)
         self.titleBar.buttonMinimum.setStyleSheet(s)
         self.titleBar.buttonMaximum.setStyleSheet(s)
+
+    def setButtonStyle(self, text_color, hover_color, hide_policy: set = None):
+        style = '''
+        QPushButton{color: %s; font-family: Webdings}
+        QPushButton:hover{background-color: %s;border-radius:0px}
+        ''' % (QColor(text_color).name(), QColor(hover_color).name())
+        self.titleBar.buttonMinimum.setStyleSheet(style)
+        self.titleBar.buttonMaximum.setStyleSheet(style)
+        self.titleBar.buttonClose.setStyleSheet(style)
+        title_height = self.titleBar.titleLabel.fontMetrics().height() + 10
+        if hide_policy is not None:
+            for e in hide_policy:
+                if e == 'min':
+                    self.titleBar.buttonMinimum.hide()
+                elif e == 'max':
+                    self.titleBar.buttonMaximum.hide()
+                elif e == 'close':
+                    self.titleBar.buttonClose.hide()
+        else:
+            self.titleBar.buttonMinimum.show()
+            self.titleBar.buttonMaximum.show()
+            self.titleBar.buttonClose.show()
 
     def hide_titlebar_all(self):
         self.titleBar.buttonMinimum.hide()
@@ -4253,3 +4426,82 @@ class PluginService(QObject):
 
     def add_task(self, func, args=(), kwargs={}, call_back=None, err_back=None):
         self._worker.add_task(func, args, kwargs, call_back, err_back)
+
+
+class CustomCom(QComboBox):
+    def __init__(self, *a, **kw):
+        super(CustomCom, self).__init__(*a, **kw)
+        self.setView(QListWidget())
+        self.setModel(self.view().model())
+
+    def add_widget(self, widget: QWidget):
+        view: QListWidget = self.view()
+        item = QListWidgetItem()
+        item.setSizeHint(QSize(100, 50))
+        view.addItem(item)
+        view.setItemWidget(item, widget)
+
+
+class HorizonHeaderView(QHeaderView):
+    search_signal = pyqtSignal(str)
+
+    def __init__(self, parent=None):
+        super().__init__(Qt.Horizontal, parent)
+        self.table: QTableWidget = parent
+        self.search_line = self.create_search()
+
+    def create_search(self):
+        def show_search():
+            w = QLineEdit()
+            hook_windowDeactivate(w)
+            w.setStyleSheet(
+                'font-family: 微软雅黑;border: 1px solid gray;border-radius:4px')
+            w.setFixedHeight(w.fontMetrics().height() * 2.5)
+            w.setPlaceholderText('请输入银行名称')
+            w.setClearButtonEnabled(True)
+            w.setMaximumWidth(150)
+            w.setWindowFlags(Qt.FramelessWindowHint | Qt.Widget)
+            w.textEdited.connect(self.search_signal)
+
+            # l = QVBoxLayout(w)
+            # l.setSpacing(0)
+            # l.setContentsMargins(0, 0, 0, 0)
+            #
+            # listwidget = QListWidget()
+            # listwidget.addItems(list('abcd'))
+            #
+            # l.addWidget(listwidget)
+            p = widget.mapToGlobal(QPoint(0, widget.height()))
+
+            self.w = w
+
+            w.move(p)
+            w.show()
+            w.raise_()
+
+        widget = QWidget(self)
+        lay = QHBoxLayout(widget)
+        lay.setSpacing(1)
+        lay.setContentsMargins(0, 0, 0, 0)
+
+        label = QLabel()
+        label.setText('银行名')
+        label.setStyleSheet('font-family: 微软雅黑;font-weight:bold')
+        label.setAlignment(Qt.AlignCenter)
+
+        btn = QPushButton()
+        btn.setIcon(QIcon(':/imgs/搜索小.svg'))
+        btn.setStyleSheet(
+            'QPushButton{border:none}QPushButton:hover{background: lightgray};')
+        btn.setCursor(Qt.PointingHandCursor)
+        btn.clicked.connect(show_search)
+
+        lay.addWidget(label, 1)
+        lay.addWidget(btn, 0)
+
+        return widget
+
+    def paintSection(self, painter: QPainter, rect: QRect, logicalIndex: int) -> None:
+        super(HorizonHeaderView, self).paintSection(painter, rect, logicalIndex)
+        if logicalIndex == 1:
+            self.search_line.setGeometry(rect)
